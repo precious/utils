@@ -29,22 +29,38 @@ appname = "Pvol"
 appicon = os.path.expanduser("/usr/share/icons/gnome/22x22/status/audio-volume-high.png")
 
 
-class NotifyServer(dbus.service.Object):
+class VolumeService(dbus.service.Object):
 	def __init__(self,bus,obj):
-		super(NotifyServer,self).__init__(bus,obj)
+		super(VolumeService,self).__init__(bus,obj)
 		self.pvol = Pvol()
-		gtk.main()
-	@dbus.service.method("org.volume.NotifyServer",in_signature='i', out_signature='b')
-	def setPercents(self, percents):
-		self.pvol.setFraction(percents)
-		return True
-	
-	@dbus.service.method("org.volume.NotifyServer",in_signature='', out_signature='')
+		self.mixer = Mixer()
+
+	@dbus.service.method("org.volume.VolumeService",in_signature='', out_signature='i')
+	def status(self):
+		return mixer.get()
+		
+	@dbus.service.method("org.volume.VolumeService",in_signature='b', out_signature='')
+	def switch_mute(self,quiet = True):
+		self.mixer.switch_mute()
+		if not quiet:
+			self.pvol.set_fraction(self.mixer.get())
+
+	@dbus.service.method("org.volume.VolumeService",in_signature='ib', out_signature='')
+	def adjust_volume(self,percents,quiet = True):
+		if percents > 0:
+			self.mixer.increase(percents)
+		else:
+			self.mixer.decrease(abs(percents))
+		if not quiet:
+			self.pvol.set_fraction(self.mixer.get())
+		
+	@dbus.service.method("org.volume.VolumeService",in_signature='', out_signature='')
 	def Exit(self):
+		del self.mixer
 		gtk.main_quit()
 		mainloop.quit()
 
-	def __handler__(signum, frame):
+	def __handler__(self, signum, frame):
 		self.Exit()
 		
 	def setTimeout(self,timeout):
@@ -53,16 +69,17 @@ class NotifyServer(dbus.service.Object):
 
 
 class Mixer:
-	def __enter__(self,pcm = False):
+	def __init__(self,pcm = False):
 		self.mixer = ossaudiodev.openmixer()
 		self.channels = [['MASTER', ossaudiodev.SOUND_MIXER_VOLUME],
 				['PCM', ossaudiodev.SOUND_MIXER_PCM]]
 		self.channel = self.channels[0][1] if not pcm else self.channels[1][1]
 		self.get = lambda: self.mixer.get(self.channel)[0]
 		self.set = lambda percents: self.mixer.set(self.channel,(percents,percents))
-		return self
+		# pulseaudio default sink (required for unmute method)
+		self.sink = os.popen('pactl info').read().split('Default Sink: ')[1].split('\n')[0]
 		
-	def __exit__(self, type, value, traceback):
+	def __del__(self):
 		self.mixer.close()
 		
 	def increase(self,percents):
@@ -79,8 +96,7 @@ class Mixer:
 	
 	# seems like ossmixer is unable to unmute volume
 	def unmute(self,value = 10):
-		sink = os.popen('pactl info').read().split('Default Sink: ')[1].split('\n')[0]
-		os.system('pactl set-sink-mute ' + sink + ' 0')
+		os.system('pactl set-sink-mute ' + self.sink + ' 0')
 		self.set(value)
 		
 	def switch_mute(self):
@@ -110,13 +126,26 @@ class Pvol:
 		self.window.show_all()
 		self.window.set_visible(False)
 		
-	def setFraction(self,percents):
+	def set_fraction(self,percents):
 		self.progressbar.set_fraction(float(percents) / 100)
 		self.progressbar.set_text("%d%%" % percents)
 		gobject.source_remove(self.timer)
 		self.timer = gobject.timeout_add(2000, self.window.set_visible,False)
 		if not self.window.get_visible():
 			self.window.set_visible(True)
+			
+
+def process_options(options,volume_service,usage):
+	is_quiet = bool(options.quiet)
+	if options.mute:
+		volume_service.switch_mute(is_quiet)
+	elif options.percent:
+		volume_service.adjust_volume(int(options.percent),is_quiet)
+	elif options.status:
+		print volume_service.get()
+	else:
+		print usage
+		exit(1)
 
 def main():
 	usage = "%s [-s] [-m] [-c PERCENT] [-p] [-q]" % os.path.basename(sys.argv[0])
@@ -128,38 +157,21 @@ def main():
 	parser.add_option('-q', '--quiet', action='store_true', dest='quiet', help='adjust volume without the progressbar')
 	(option, args) = parser.parse_args()
 
-	with Mixer() as mixer:
-		if option.mute:
-			mixer.switch_mute()
-		elif option.percent:
-			value = int(option.percent)
-			mixer.increase(value) if value > 0 else mixer.decrease(abs(value))
-		elif option.status:
-			print(mixer.get())
-		else:
-			print usage
-			exit(1)
-		percents = mixer.get()
-
-	if option.quiet:
-		return 0
-
 	dbus.set_default_main_loop(dbus.mainloop.glib.DBusGMainLoop())
 	bus = dbus.SessionBus()
 	try:
-		NotifyServerObject = bus.get_object("org.volume.NotifyServer", "/NotifyServer")
-		NotifyServerObject.setPercents(percents,dbus_interface = "org.volume.NotifyServer")
+		VolumeServiceObject = bus.get_object("org.volume.VolumeService", "/VolumeService")
+		process_options(option,VolumeServiceObject,usage)
 	except dbus.DBusException:
-		name = dbus.service.BusName("org.volume.NotifyServer",bus)
-		object = NotifyServer(bus, "/NotifyServer")
+		name = dbus.service.BusName("org.volume.VolumeService",bus)
+		VolumeServiceObject = VolumeService(bus, "/VolumeService")
+		process_options(option,VolumeServiceObject,usage)
 		# how many secons service should remain in memory
-		object.setTimeout(60)
-		object.setPercents(percents)
-
+		VolumeServiceObject.setTimeout(60)
 		mainloop = gobject.MainLoop()
 		try: mainloop.run()
 		except: exit(0)
-	
+
 	return 0
 
 
