@@ -1,0 +1,14 @@
+pvol.py - Commandline audio volume utility with an optional GTK progressbar.
+          After first call remains in memory some time or all the time if has
+          been launched as daemon.
+          
+          Examples:
+              pvol.py -c -5
+              pvol.py -c +5
+              pvol.py -m
+          	
+          or if launched as daemon:
+              qdbus org.volume.VolumeService /VolumeService adjust_volume -5 False
+              qdbus org.volume.VolumeService /VolumeService adjust_volume +5 False
+              qdbus org.volume.VolumeService /VolumeService switch_mute True
+
