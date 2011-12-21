@@ -26,8 +26,7 @@ import dbus.mainloop.glib
 import signal
 
 appname = "Pvol"
-appicon = os.path.expanduser("/usr/share/icons/gnome/22x22/status/audio-volume-high.png")
-
+icons_path = "/usr/share/icons/gnome/22x22/status/"
 
 class VolumeService(dbus.service.Object):
 	def __init__(self,bus,path):
@@ -44,7 +43,7 @@ class VolumeService(dbus.service.Object):
 	def switch_mute(self,quiet = True):
 		self.mixer.switch_mute()
 		if not quiet:
-			self.pvol.set_fraction(self.mixer.get())
+			self.pvol.set_fraction_and_show(self.mixer.get())
 
 	@dbus.service.method("org.volume.VolumeService",in_signature='ib', out_signature='')
 	def adjust_volume(self,percents,quiet = True):
@@ -53,7 +52,7 @@ class VolumeService(dbus.service.Object):
 		else:
 			self.mixer.decrease(abs(percents))
 		if not quiet:
-			self.pvol.set_fraction(self.mixer.get())
+			self.pvol.set_fraction_and_show(self.mixer.get())
 		
 	@dbus.service.method("org.volume.VolumeService",in_signature='', out_signature='')
 	def Exit(self):
@@ -82,6 +81,7 @@ class Mixer:
 		self.set = lambda percents: self.mixer.set(self.channel,(percents,percents))
 		# pulseaudio default sink (required for unmute method)
 		self.sink = os.popen('pactl info').read().split('Default Sink: ')[1].split('\n')[0]
+		self.value_before_muted = 10
 		
 	def __del__(self):
 		self.mixer.close()
@@ -94,14 +94,17 @@ class Mixer:
 		
 	def decrease(self,percents):
 		self.set(max(0,self.get() - percents))
+		if self.get() <= 0:
+			self.value_before_muted = 10
 		
 	def mute(self):
+		self.value_before_muted = self.get()
 		self.set(0)
 	
 	# seems like ossmixer is unable to unmute volume
-	def unmute(self,value = 10):
+	def unmute(self,value = None):
 		os.system('pactl set-sink-mute ' + self.sink + ' 0')
-		self.set(value)
+		self.set(value if value != None else self.value_before_muted)
 		
 	def switch_mute(self):
 		self.mute() if self.get() > 0 else self.unmute()
@@ -114,23 +117,42 @@ class Pvol:
 		self.window.set_border_width(1)
 		self.window.set_default_size(180, -1)
 		self.window.set_position(gtk.WIN_POS_CENTER)
+		
+		self.icons = {"high": None, "medium": None, "low": None, "muted": None}
+		for name in self.icons:
+			self.icons[name] = gtk.Image()
+			self.icons[name].set_from_file(icons_path + "audio-volume-" + name + ".png")
+			self.icons[name].show()
 
-		self.icon = gtk.Image()
-		self.icon.set_from_file(appicon)
-		self.icon.show()
+		self.icon = self.icons["high"]
+		self.percents = 0
 
 		self.progressbar = gtk.ProgressBar()
 		self.progressbar.set_orientation(gtk.PROGRESS_LEFT_TO_RIGHT)
 
 		self.widgetbox = gtk.HBox()
-		self.widgetbox.pack_start(self.icon)
-		self.widgetbox.pack_start(self.progressbar)
+		self.widgetbox.pack_end(self.icon)
+		self.widgetbox.pack_end(self.progressbar)
 		self.window.add(self.widgetbox)
 		self.timer = -1
 		self.window.show_all()
 		self.window.set_visible(False)
 		
-	def set_fraction(self,percents):
+	def set_percents(self,percents):
+		self.percents = percents
+		self.widgetbox.remove(self.icon)
+		if percents <= 0:
+			self.icon = self.icons["muted"]
+		elif percents <= 33:
+			self.icon = self.icons["low"]
+		elif percents <= 66:
+			self.icon = self.icons["medium"]
+		else:
+			self.icon = self.icons["high"]
+		self.widgetbox.pack_end(self.icon)
+		
+	def set_fraction_and_show(self,percents):
+		self.set_percents(percents)	
 		self.progressbar.set_fraction(float(percents) / 100)
 		self.progressbar.set_text("%d%%" % percents)
 		gobject.source_remove(self.timer)
