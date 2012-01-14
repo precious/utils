@@ -1,5 +1,9 @@
 #!/usr/bin/python
 
+# usage:
+#   save_clipboard_image.py [path]
+# image from clipboard will be saved to the path (default - home)
+
 import gtk
 import os
 import sys

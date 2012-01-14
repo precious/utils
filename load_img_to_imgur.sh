@@ -17,6 +17,8 @@
 
 filename=$1
 
+# export http_proxy=http://localhost:9045
+
 function uploadImage {
   curl -s -F "image=@$1" -F "key=6af857bfde70d28a6df70be425e453bc" http://imgur.com/api/upload.xml | grep -Po "(?<=<original_image>).*(?=</original_image>)"
 }

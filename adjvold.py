@@ -1,16 +1,24 @@
 #!/usr/bin/env python
 
-# pvol -- Commandline audio volume utility
-#		with an optional GTK progressbar
-#		and which is able to remain in memory some time as dbus service
-#		(to prevent multiple gtk popup window creation) 
+# adjvold -- dbus service for volume adjusting with an optional GTK progressbar
+#
 # Copyright (C) 2009 Adrian C. <anrxc_sysphere_org>
-#		2011 Seva K. <vs_kulaga_gmail_com>
+# Modified by	2011 Seva K. <vs.kulaga_gmail_com>
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
 # (at your option) any later version.
+
+# usage:
+# to start service:
+#    nohup /path/to/adjvold.py &
+# to adjust volume:
+#    python -c "import dbus; dbus.SessionBus().get_object('org.volume.VolumeService', '/VolumeService').adjust_volume(-10,False);"
+#    python -c "import dbus; dbus.SessionBus().get_object('org.volume.VolumeService', '/VolumeService').switch_mute(False)"
+# or
+#    qdbus org.volume.VolumeService /VolumeService adjust_volume -10 False
+#    qdbus org.volume.VolumeService /VolumeService switch_mute False
 
 
 import gtk
@@ -25,7 +33,7 @@ import dbus.service
 import dbus.mainloop.glib
 import signal
 
-appname = "Pvol"
+appname = "adjvold"
 # path must end with slash
 icons_path = "/usr/share/icons/gnome/24x24/status/"
 
@@ -44,7 +52,7 @@ class VolumeService(dbus.service.Object):
 	def switch_mute(self,quiet = True):
 		self.mixer.switch_mute()
 		if not quiet:
-			self.pvol.set_fraction_and_show(self.mixer.get())
+			self.pvol.set_percents_and_show(self.mixer.get())
 
 	@dbus.service.method("org.volume.VolumeService",in_signature='ib', out_signature='')
 	def adjust_volume(self,percents,quiet = True):
@@ -53,15 +61,15 @@ class VolumeService(dbus.service.Object):
 		else:
 			self.mixer.decrease(abs(percents))
 		if not quiet:
-			self.pvol.set_fraction_and_show(self.mixer.get())
+			self.pvol.set_percents_and_show(self.mixer.get())
 		
 	@dbus.service.method("org.volume.VolumeService",in_signature='', out_signature='')
-	def Exit(self):
+	def exit(self):
 		del self.mixer
 		self.mainloop.quit()
 
 	def __handler__(self, signum, frame):
-		self.Exit()
+		self.exit()
 		
 	def setTimeout(self,timeout):
 		signal.signal(signal.SIGALRM,self.__handler__)
@@ -152,7 +160,7 @@ class Pvol:
 			self.icon = self.icons["high"]
 		self.widgetbox.pack_end(self.icon)
 		
-	def set_fraction_and_show(self,percents):
+	def set_percents_and_show(self,percents):
 		self.set_percents(percents)	
 		self.progressbar.set_fraction(float(percents) / 100)
 		self.progressbar.set_text("%d%%" % percents)
@@ -160,48 +168,13 @@ class Pvol:
 		self.timer = gobject.timeout_add(2000, self.window.set_visible,False)
 		if not self.window.get_visible():
 			self.window.set_visible(True)
-			
-
-def process_options(options,volume_service,usage):
-	is_quiet = bool(options.quiet)
-	if options.mute:
-		volume_service.switch_mute(is_quiet)
-	elif options.percent:
-		volume_service.adjust_volume(int(options.percent),is_quiet)
-	elif options.status:
-		print volume_service.get()
-	elif not options.daemon:
-		print usage
-		exit(1)
-
 
 def main():
-	prog_name = os.path.basename(sys.argv[0])
-	usage = "%s [-s] [-m] [-c PERCENT] [-p] [-q] [-d]" % prog_name
-	parser = optparse.OptionParser(usage=usage)
-	parser.add_option('-s', '--status', action='store_true', dest='status', help='display current volume')
-	parser.add_option('-m', '--mute', action='store_true', dest='mute', help='mute the main audio channel')
-	parser.add_option('-c', '--change', type='int', dest='percent', help='increase or decrease volume by given percentage')
-	parser.add_option('-p', '--pcm', action='store_true', dest='pcm', default=False, help='change PCM channel (default is MASTER)')
-	parser.add_option('-q', '--quiet', action='store_true', dest='quiet', help='adjust volume without the progressbar')
-	parser.add_option('-d', '--daemon', action='store_true', dest='daemon', help=('start %s dbus service as daemon' % prog_name))
-	(option, args) = parser.parse_args()
-
 	dbus.set_default_main_loop(dbus.mainloop.glib.DBusGMainLoop())
 	bus = dbus.SessionBus()
-	is_service = False
-	try:
-		VolumeServiceObject = bus.get_object("org.volume.VolumeService", "/VolumeService")
-	except dbus.DBusException:
-		is_service = True
-		name = dbus.service.BusName("org.volume.VolumeService",bus)
-		VolumeServiceObject = VolumeService(bus, "/VolumeService")
-		# how many seconds service should remain in memory
-		if not option.daemon:
-			VolumeServiceObject.setTimeout(60)
-	process_options(option,VolumeServiceObject,usage)
-	if is_service:	
-		VolumeServiceObject.run()
+	name = dbus.service.BusName("org.volume.VolumeService",bus)
+	VolumeServiceObject = VolumeService(bus, "/VolumeService")
+	VolumeServiceObject.run()
 	
 	return 0
 
