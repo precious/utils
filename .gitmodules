@@ -1,0 +1,3 @@
+[submodule "kinopoisk_to_imdb"]
+	path = kinopoisk_to_imdb
+	url = /home/precious/programming/utils/kinopoisk_to_imdb
