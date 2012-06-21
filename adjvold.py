@@ -12,7 +12,7 @@
 
 # usage:
 # to start service:
-#    nohup /path/to/adjvold.py &
+#    /path/to/adjvold.py & disown $!
 # to adjust volume:
 #    python -c "import dbus; dbus.SessionBus().get_object('org.volume.VolumeService', '/VolumeService').adjust_volume(-10,False);"
 #    python -c "import dbus; dbus.SessionBus().get_object('org.volume.VolumeService', '/VolumeService').switch_mute(False)"
