@@ -30,7 +30,6 @@ cd $DIR
 if [ $? == 0 ]
 then
         link=`uploadImage "$filename"`
-	echo $link
         echo "$link" | xclip -selection c
         echo "$DATE $filename $link" >> "$DIR/links.txt"
         notify-send "Image upload done" "$filename<br>$link"
